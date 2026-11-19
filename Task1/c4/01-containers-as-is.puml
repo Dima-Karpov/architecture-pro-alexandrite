@@ -1,0 +1,77 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+LAYOUT_LEFT_RIGHT()
+HIDE_STEREOTYPE()
+
+skinparam linetype ortho
+skinparam nodesep 55
+skinparam ranksep 65
+skinparam wrapWidth 160
+
+title Container — «Александрит» as-is\nShop / CRM / MES · общая Shop DB · RabbitMQ · один инстанс на сервис
+
+Person(customer, "Customer", "Заказ и 3D-модель")
+Person(seller, "Seller", "CRM: ведёт заказ")
+Person(apiUser, "API user", "Partner → MES API")
+Person(operator, "Operator", "MES: берёт заказ")
+
+System_Boundary(shop, "Online Shop") {
+  Container(shopUi, "Internet Shop UI", "Vue, TS, Three.js", "Витрина, заказ, 3D")
+  Container(shopApi, "Shop API", "Spring Boot", "Каталог, 3D, заказ клиента")
+  ContainerDb(shopDb, "Shop DB", "PostgreSQL", "Клиенты и заказы (shared с CRM)")
+  Container(s3, "3D files storage", "S3", "Модели для расчёта цены")
+}
+
+System_Boundary(crm, "CRM") {
+  Container(crmUi, "CRM UI", "Vue, TS", "UI продавца")
+  Container(crmApi, "CRM API", "Spring Boot", "Заказ · Shop DB · RabbitMQ")
+}
+
+System_Boundary(mes, "MES") {
+  Container(mesUi, "MES UI", "React, TS", "Дашборд операторов")
+  Container(mesApi, "MES API", "C#", "Список, расчёт цены, partner API")
+  ContainerDb(mesDb, "MES DB", "PostgreSQL", "Заказы и назначения · один R/W")
+}
+
+System_Boundary(msg, "Messaging") {
+  ContainerQueue(rabbit, "RabbitMQ", "broker", "Заказы и статусы CRM↔MES")
+}
+
+Rel(customer, shopUi, "HTTPS", "")
+Rel(shopUi, shopApi, "REST", "HTTPS")
+Rel(shopApi, shopDb, "SQL", "")
+Rel(shopApi, s3, "S3", "")
+
+Rel(seller, crmUi, "HTTPS", "")
+Rel(crmUi, crmApi, "REST", "HTTPS")
+Rel(crmApi, shopDb, "SQL shared", "")
+Rel(crmApi, s3, "S3", "")
+
+Rel(apiUser, mesApi, "partner", "HTTPS")
+Rel(operator, mesUi, "HTTPS", "")
+Rel(mesUi, mesApi, "REST", "HTTPS")
+Rel(mesApi, mesDb, "SQL", "")
+Rel(mesApi, s3, "S3", "")
+
+Rel(crmApi, rabbit, "AMQP", "")
+Rel(mesApi, rabbit, "AMQP", "")
+
+Lay_D(customer, seller)
+Lay_D(seller, apiUser)
+Lay_D(apiUser, operator)
+
+Lay_R(shopUi, shopApi)
+Lay_R(shopApi, shopDb)
+Lay_D(shopDb, s3)
+
+Lay_R(crmUi, crmApi)
+
+Lay_R(mesUi, mesApi)
+Lay_R(mesApi, mesDb)
+
+Lay_D(shop, crm)
+Lay_D(crm, mes)
+Lay_R(mes, msg)
+
+@enduml
