@@ -1,0 +1,32 @@
+@startuml
+title Альтернатива B: Refresh-Ahead (не берём как основу)
+skinparam sequenceMessageAlign center
+skinparam maxMessageSize 200
+
+participant "Фоновый job" as Job
+participant "MES API\n/ worker" as API
+database "MES DB" as DB
+database "Redis" as Redis
+actor "Оператор" as Op
+
+loop каждые N секунд
+  Job -> API: прогреть горячие ключи
+  API -> DB: SELECT списков
+  DB --> API: rows
+  API -> Redis: SET mes:orders:…
+  Redis --> API: OK
+end
+
+Op -> API: GET /orders
+API -> Redis: GET
+Redis --> API: всегда «свежий» снимок
+API --> Op: список
+
+note over Job, Redis
+  Список заказов меняется часто
+  (взяли / пришёл новый / статус).
+  Job гоняет БД даже без читателей
+  и всё равно отстаёт между тиками.
+  Сложнее Cache-Aside + DEL по событию.
+end note
+@enduml

@@ -1,0 +1,35 @@
+@startuml
+title Кеш MES: смена статуса + инвалидация
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 220
+
+actor "Оператор" as Op
+participant "MES UI" as UI
+participant "MES API" as API
+database "MES DB" as DB
+database "Redis" as Redis
+queue "RabbitMQ" as MQ
+
+Op -> UI: взять заказ / сменить статус
+UI -> API: PATCH /orders/{id}\nstatus=MANUFACTURING_STARTED
+
+API -> DB: UPDATE status\n(+ outbox в той же TX)
+DB --> API: OK
+API -> Redis: DEL известные ключи страниц\nили SCAN по префиксу статуса
+note right of Redis
+  Сбрасываем ключи списков
+  old/new status.
+  Не KEYS * / не FLUSHALL.
+end note
+Redis --> API: OK
+
+API -> MQ: publish статус\n(через outbox relay)
+API --> UI: 200
+UI --> Op: заказ убран из «новых»
+
+note over Op, Redis
+  Следующий GET списка → miss → свежие данные из БД.
+  Короткий TTL — страховка, если DEL пропустили.
+end note
+@enduml
