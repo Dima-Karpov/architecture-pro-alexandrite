@@ -1,0 +1,62 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+!include tags.inc
+
+LAYOUT_LEFT_RIGHT()
+HIDE_STEREOTYPE()
+
+skinparam linetype ortho
+skinparam nodesep 55
+skinparam ranksep 65
+skinparam wrapWidth 170
+
+title Container — логирование «Александрит»\nJSON с order_id / trace_id · Filebeat → Logstash → ES → Kibana\nсиним — источники и ELK
+
+Person(apiUser, "API user", "Partner → MES", $tags="existing")
+Person(support, "Support / DevOps", "Поиск по order_id", $tags="existing")
+
+System_Boundary(apps, "Откуда собираем логи") {
+  Container(crmApi, "CRM API", "Spring + JSON", "Статусы · очередь · DLQ", $tags="logs")
+  Container(mesApi, "MES API", "C# + JSON", "Partner · calc · статусы", $tags="logs")
+  Container(shopApi, "Shop API", "Spring + JSON", "Создание заказа · статусы", $tags="logs")
+  ContainerQueue(rabbit, "RabbitMQ", "broker", "События publish/consume пишем в API", $tags="existing")
+}
+
+System_Boundary(elk, "ELK") {
+  Container(filebeat, "Filebeat", "shipper", "На EC2 · забирает JSON", $tags="logs")
+  Container(logstash, "Logstash", "pipeline", "Парсит · режет PII", $tags="logs")
+  ContainerDb(es, "Elasticsearch", "indices + ILM", "logs-{service}-* · ~30 дней", $tags="logs")
+  Container(kibana, "Kibana", "UI + alerts", "Поиск · аномалии rate", $tags="logs")
+}
+
+Rel(apiUser, mesApi, "partner", "HTTPS", $tags="existing")
+Rel(crmApi, rabbit, "publish/consume", "AMQP", $tags="existing")
+Rel(mesApi, rabbit, "publish/consume", "AMQP", $tags="existing")
+Rel(shopApi, crmApi, "заказ / статус", "HTTPS", $tags="existing")
+
+Rel(shopApi, filebeat, "tail/stdout JSON", "", $tags="logs")
+Rel(crmApi, filebeat, "tail/stdout JSON", "", $tags="logs")
+Rel(mesApi, filebeat, "tail/stdout JSON", "", $tags="logs")
+Rel(filebeat, logstash, "beats", "", $tags="logs")
+Rel(logstash, es, "index", "", $tags="logs")
+Rel(kibana, es, "query", "", $tags="logs")
+Rel(support, kibana, "VPN/SSO", "HTTPS", $tags="existing")
+
+note bottom of logstash
+  **INFO:** ts, service, event, order_id,
+  customer_id, status, trace_id
+  **Не пишем:** ФИО / телефон / email / 3D
+  **ILM:** ~30 дней
+end note
+
+Lay_R(crmApi, mesApi)
+Lay_R(mesApi, shopApi)
+Lay_D(crmApi, rabbit)
+
+Lay_R(apps, elk)
+Lay_D(filebeat, logstash)
+Lay_D(logstash, es)
+Lay_D(es, kibana)
+
+SHOW_LEGEND()
+@enduml
