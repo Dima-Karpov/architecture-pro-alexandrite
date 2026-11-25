@@ -1,5 +1,5 @@
 @startuml
-title Кеш MES: смена статуса + инвалидация
+title Кеш MES: смена статуса + версия + инвалидация
 skinparam sequenceMessageAlign center
 skinparam responseMessageBelowArrow true
 skinparam maxMessageSize 220
@@ -16,10 +16,11 @@ UI -> API: PATCH /orders/{id}\nstatus=MANUFACTURING_STARTED
 
 API -> DB: UPDATE status\n(+ outbox в той же TX)
 DB --> API: OK
-API -> Redis: DEL известные ключи страниц\nили SCAN по префиксу статуса
+API -> Redis: атомарно: INCR mes:orders:ver\n+ DEL ключи old/new status\n(или SCAN по префиксу)
 note right of Redis
-  Сбрасываем ключи списков
-  old/new status.
+  Сначала bump версии, потом DEL.
+  Гонка «miss → старый SELECT → SET после DEL»
+  не перезапишет кеш устаревшим JSON.
   Не KEYS * / не FLUSHALL.
 end note
 Redis --> API: OK
@@ -29,7 +30,7 @@ API --> UI: 200
 UI --> Op: заказ убран из «новых»
 
 note over Op, Redis
-  Следующий GET списка → miss → свежие данные из БД.
+  Следующий GET → miss → SELECT + SET только если ver не выросла.
   Короткий TTL — страховка, если DEL пропустили.
 end note
 @enduml
