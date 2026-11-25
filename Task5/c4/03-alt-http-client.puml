@@ -1,0 +1,37 @@
+@startuml
+title Альтернатива A: клиентский HTTP-кеш (не берём)
+skinparam sequenceMessageAlign center
+skinparam maxMessageSize 200
+
+actor "Оператор A" as A
+actor "Оператор B" as B
+participant "Браузер A\n(свой кеш)" as BA
+participant "Браузер B\n(свой кеш)" as BB
+participant "MES API" as API
+database "MES DB" as DB
+
+A -> BA: открыть список
+BA -> API: GET /orders\n(если нет свежего ответа)
+API -> DB: SELECT
+DB --> API: rows
+API --> BA: 200\nCache-Control: max-age=60
+BA --> A: список
+
+B -> BB: открыть список
+BB -> API: GET /orders
+API --> BB: тот же список\n(max-age=60)
+BB --> B: список
+
+A -> BA: взять заказ #42
+BA -> API: PATCH status
+API -> DB: UPDATE
+API --> BA: 200
+
+note over B, BB
+  У B ещё до 60 с висит старый ответ:
+  заказ #42 «свободен». Два оператора
+  гоняются за одним заказом.
+  Инвалидировать чужой браузерный кеш
+  с сервера нельзя.
+end note
+@enduml

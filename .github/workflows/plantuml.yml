@@ -7,10 +7,12 @@ on:
   push:
     paths:
       - "Task*/**/*.puml"
+      - "docs/**/*.puml"
       - ".github/workflows/plantuml.yml"
   pull_request:
     paths:
       - "Task*/**/*.puml"
+      - "docs/**/*.puml"
       - ".github/workflows/plantuml.yml"
   workflow_dispatch:
 
@@ -44,7 +46,7 @@ jobs:
       - name: Generate diagrams
         run: |
           set -euo pipefail
-          mapfile -d '' files < <(find Task1 Task2 Task3 Task4 Task5 -name '*.puml' -print0 2>/dev/null | sort -z)
+          mapfile -d '' files < <(find Task1 Task2 Task3 Task4 Task5 docs -name '*.puml' -print0 2>/dev/null | sort -z)
           if [ "${#files[@]}" -eq 0 ]; then
             echo "No .puml files yet"
             exit 0
@@ -65,6 +67,7 @@ jobs:
             Task3/**/*.svg
             Task4/**/*.svg
             Task5/**/*.svg
+            docs/**/*.svg
           if-no-files-found: warn
 
       - name: Commit diagrams
@@ -72,7 +75,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          find Task1 Task2 Task3 Task4 Task5 -name '*.svg' -exec git add {} + 2>/dev/null || true
+          find Task1 Task2 Task3 Task4 Task5 docs -name '*.svg' -exec git add {} + 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "No diagram changes"
           else

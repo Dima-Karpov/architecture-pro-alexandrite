@@ -1,0 +1,147 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+!include tags.inc
+
+LAYOUT_LEFT_RIGHT()
+HIDE_STEREOTYPE()
+
+skinparam linetype ortho
+skinparam nodesep 55
+skinparam ranksep 65
+skinparam wrapWidth 160
+
+title Container — «Александрит» to-be (6 месяцев)\nAPI Gateway · Outbox/DLQ · OTel→Jaeger · Redis · scale-out по потребности\nK8s cutover не входит
+
+Person(customer, "Customer", "Заказ и 3D-модель", $tags="existing")
+Person(seller, "Seller", "CRM: ведёт заказ", $tags="existing")
+Person(apiUser, "API user", "Partner API", $tags="existing")
+Person(operator, "Operator", "MES: берёт заказ", $tags="existing")
+
+System_Boundary(edge, "Edge") {
+  Container(gw, "API Gateway", "gateway", "HTTPS вход: route /shop|/crm|/mes|/partner\nrate limit partner · баланс на N инстансов", $tags="new")
+}
+
+System_Boundary(shop, "Online Shop") {
+  Container(shopUi, "Internet Shop UI", "Vue, TS, Three.js", "Витрина, заказ, 3D", $tags="existing")
+  Container(shopApi, "Shop API", "Spring Boot", "Каталог, 3D, заказ · OTel SDK", $tags="existing")
+  ContainerDb(shopDb, "Shop DB", "PostgreSQL", "Shared Shop+CRM · coupling/SPOF", $tags="existing")
+  Container(s3, "3D files storage", "S3", "Модели для расчёта цены", $tags="existing")
+}
+
+System_Boundary(crm, "CRM") {
+  Container(crmUi, "CRM UI", "Vue, TS", "UI продавца", $tags="existing")
+  Container(crmApi, "CRM API", "Spring Boot", "Consumer + Outbox · OTel SDK", $tags="existing")
+  Container(crmApi2, "CRM API #2", "Spring Boot", "Scale-out по нагрузке · за Gateway", $tags="new")
+  Container(crmOutbox, "CRM Outbox + relay", "table + worker", "Tx с заказом → Rabbit confirms", $tags="new")
+}
+
+System_Boundary(mes, "MES") {
+  Container(mesUi, "MES UI", "React, TS", "Дашборд операторов", $tags="existing")
+  Container(mesApi, "MES API", "C#", "Prefetch, calc pool · OTel SDK", $tags="existing")
+  Container(mesApi2, "MES API #2", "C#", "Scale-out по нагрузке · за Gateway", $tags="new")
+  Container(mesOutbox, "MES Outbox + relay", "table + worker", "Tx со статусом → Rabbit confirms", $tags="new")
+  ContainerDb(mesDb, "MES DB", "PostgreSQL", "Primary R/W", $tags="existing")
+  ContainerDb(mesReplica, "MES DB read-replica", "PostgreSQL", "Чтение списка заказов", $tags="new")
+}
+
+System_Boundary(msg, "Messaging") {
+  ContainerQueue(rabbit, "RabbitMQ", "broker", "CRM↔MES · retry+TTL · confirms", $tags="existing")
+  ContainerQueue(dlq, "DLQ / parking-lot", "DLX", "Битые после N fail · triage / replay", $tags="new")
+}
+
+System_Boundary(cache, "Cache") {
+  Container(redis, "Redis", "Cache-Aside", "Список заказов MES · TTL + invalidate по статусу", $tags="new")
+}
+
+System_Boundary(obs, "Observability") {
+  Container(prom, "Prometheus", "metrics", "RED, depth/age очередей (CRM↔MES + calc), DLQ, saturation", $tags="new")
+  Container(grafana, "Grafana", "alerts", "Алерты: DLQ + calc queue age/depth", $tags="new")
+  Container(otel, "OpenTelemetry Collector", "OTLP", "Spans из API SDK", $tags="new")
+  Container(jaeger, "Jaeger", "traces", "trace_id + order_id", $tags="new")
+  Container(elk, "ELK", "logs", "INFO статусов · без PII · ILM", $tags="new")
+}
+
+' --- people → UI / gateway ---
+Rel(customer, shopUi, "HTTPS", "", $tags="existing")
+Rel(seller, crmUi, "HTTPS", "", $tags="existing")
+Rel(operator, mesUi, "HTTPS", "", $tags="existing")
+Rel(apiUser, gw, "partner +\nrate limit", "HTTPS", $tags="new")
+
+Rel(shopUi, gw, "REST", "HTTPS", $tags="new")
+Rel(crmUi, gw, "REST", "HTTPS", $tags="new")
+Rel(mesUi, gw, "REST", "HTTPS", $tags="new")
+
+Rel(gw, shopApi, "/shop", "HTTPS", $tags="new")
+Rel(gw, crmApi, "/crm", "HTTPS", $tags="new")
+Rel(gw, crmApi2, "/crm\n(scale)", "HTTPS", $tags="new")
+Rel(gw, mesApi, "/mes|/partner", "HTTPS", $tags="new")
+Rel(gw, mesApi2, "/mes\n(scale)", "HTTPS", $tags="new")
+
+' --- shop / crm / mes data ---
+Rel(shopApi, shopDb, "SQL", "", $tags="existing")
+Rel(shopApi, s3, "S3", "", $tags="existing")
+Rel(crmApi, shopDb, "SQL shared", "", $tags="existing")
+Rel(crmApi2, shopDb, "SQL shared", "", $tags="new")
+Rel(crmApi, s3, "S3", "", $tags="existing")
+Rel(mesApi, mesDb, "SQL", "", $tags="existing")
+Rel(mesApi2, mesDb, "SQL", "", $tags="new")
+Rel(mesApi, mesReplica, "read", "SQL", $tags="new")
+Rel(mesApi, s3, "S3", "", $tags="existing")
+Rel(mesApi, redis, "Cache-Aside", "", $tags="new")
+
+' --- outbox / queue ---
+Rel(crmApi, crmOutbox, "одна tx", "SQL", $tags="new")
+Rel(crmOutbox, rabbit, "publish", "AMQP", $tags="new")
+Rel(crmApi, rabbit, "consume", "AMQP", $tags="existing")
+Rel(mesApi, mesOutbox, "одна tx", "SQL", $tags="new")
+Rel(mesOutbox, rabbit, "publish", "AMQP", $tags="new")
+Rel(mesApi, rabbit, "consume", "AMQP", $tags="existing")
+Rel(rabbit, dlq, "N fail → DLX", "AMQP", $tags="new")
+
+' --- observability (по одному ребру на контур, без веера) ---
+Rel(gw, prom, "RPS/429", "", $tags="new")
+Rel(mesApi, prom, "API+queue\n(+ Shop/CRM)", "", $tags="new")
+Rel(dlq, prom, "size/age", "", $tags="new")
+Rel(prom, grafana, "alerts", "", $tags="new")
+Rel(mesApi, otel, "OTLP\n(+ Shop/CRM)", "", $tags="new")
+Rel(otel, jaeger, "export", "", $tags="new")
+Rel(mesApi, elk, "logs\n(+ Shop/CRM)", "", $tags="new")
+
+note bottom of gw
+  **Gateway** = route + rate limit + баланс на API #2
+  **#8** CRM/MES API #2 — scale-out по нагрузке
+  **#11** Outbox · DLQ  **#3** OTel→Jaeger  **#5** Redis Cache-Aside
+end note
+
+Lay_D(customer, seller)
+Lay_D(seller, apiUser)
+Lay_D(apiUser, operator)
+
+Lay_R(shopUi, shopApi)
+Lay_R(shopApi, shopDb)
+Lay_D(shopDb, s3)
+
+Lay_R(crmUi, crmApi)
+Lay_R(crmApi, crmApi2)
+Lay_D(crmApi, crmOutbox)
+
+Lay_R(mesUi, mesApi)
+Lay_R(mesApi, mesApi2)
+Lay_R(mesApi, mesDb)
+Lay_D(mesDb, mesReplica)
+Lay_D(mesApi, mesOutbox)
+
+Lay_D(edge, shop)
+Lay_D(shop, crm)
+Lay_D(crm, mes)
+Lay_R(mes, msg)
+Lay_R(rabbit, dlq)
+Lay_R(msg, cache)
+Lay_R(cache, obs)
+Lay_D(prom, grafana)
+Lay_R(prom, otel)
+Lay_R(otel, jaeger)
+Lay_R(jaeger, elk)
+
+SHOW_LEGEND()
+@enduml

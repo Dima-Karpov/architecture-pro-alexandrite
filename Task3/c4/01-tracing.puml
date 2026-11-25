@@ -1,0 +1,72 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+!include tags.inc
+
+LAYOUT_LEFT_RIGHT()
+HIDE_STEREOTYPE()
+
+skinparam linetype ortho
+skinparam nodesep 55
+skinparam ranksep 65
+skinparam wrapWidth 170
+
+title Container — трейсинг «Александрит»\nShop/CRM через shared Shop DB · MES + RabbitMQ · OTLP → Collector → Jaeger\nкрасным — новое (SDK/OTLP/propagation); UI / internals DB / S3 не инструментируем
+
+Person(apiUser, "API user", "Partner → MES", $tags="existing")
+Person(support, "Support / DevOps", "Triage по order_id", $tags="existing")
+
+System_Boundary(apps, "Critical path (инструментируем)") {
+  Container(shopApi, "Shop API", "Spring + OTel SDK", "HTTP entry · пишет заказ + W3C в DB", $tags="trace")
+  ContainerDb(shopDb, "Shop DB", "PostgreSQL", "Shared Shop+CRM · order_id + traceparent", $tags="existing")
+  Container(crmApi, "CRM API", "Spring + OTel SDK", "Читает DB · Outbox · Rabbit", $tags="trace")
+  Container(mesApi, "MES API", "C# + OTel SDK", "Partner + calc publish/consume", $tags="trace")
+  ContainerQueue(rabbit, "RabbitMQ", "broker", "CRM↔MES + calc · AMQP headers W3C", $tags="existing")
+}
+
+System_Boundary(obs, "Observability (трейсы)") {
+  Container(otel, "OpenTelemetry Collector", "OTLP", "Sampling · scrub PII · export", $tags="trace")
+  Container(jaeger, "Jaeger", "traces", "UI/query · trace_id + order_id", $tags="trace")
+}
+
+' --- бизнес-связи (as-is: Shop↔CRM через shared DB, не HTTP) ---
+Rel(apiUser, mesApi, "partner", "HTTPS + W3C", $tags="trace")
+Rel(shopApi, shopDb, "INSERT order\n+ traceparent", "SQL", $tags="trace")
+Rel(crmApi, shopDb, "SELECT order\ncontinue W3C", "SQL shared", $tags="trace")
+Rel(crmApi, rabbit, "publish/consume\nCRM↔MES", "AMQP + W3C headers", $tags="trace")
+Rel(mesApi, rabbit, "publish/consume\nCRM↔MES + calc", "AMQP + W3C headers", $tags="trace")
+
+' --- OTLP ---
+Rel(shopApi, otel, "OTLP", "", $tags="trace")
+Rel(crmApi, otel, "OTLP", "", $tags="trace")
+Rel(mesApi, otel, "OTLP", "", $tags="trace")
+Rel(otel, jaeger, "export", "", $tags="trace")
+
+Rel(support, jaeger, "VPN/SSO\nпоиск order_id", "HTTPS", $tags="existing")
+
+note bottom of shopDb
+  **Shop→CRM = shared DB, не HTTP.**
+  Shop пишет `traceparent`/`order_id` в строку заказа;
+  CRM продолжает тот же trace → в Jaeger видно
+  «заказ в DB, CRM ещё не взял» (задержка)
+  vs «нет CRM-span / другой trace_id» (разрыв).
+end note
+
+note bottom of otel
+  **Не трейсим:** UI (RUM), internals PostgreSQL/S3
+  **Атрибуты:** trace_id, service.name, route/status,
+  messaging.destination/operation, **order_id**, order.status, error
+  **Prod sampling:** ~10% + always-on errors/critical
+end note
+
+Lay_D(apiUser, support)
+
+Lay_R(shopApi, shopDb)
+Lay_R(shopDb, crmApi)
+Lay_R(crmApi, mesApi)
+Lay_D(crmApi, rabbit)
+
+Lay_R(apps, obs)
+Lay_D(otel, jaeger)
+
+SHOW_LEGEND()
+@enduml

@@ -1,0 +1,37 @@
+@startuml
+title Кеш MES: чтение списка заказов (Cache-Aside + версия)
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 220
+
+actor "Оператор" as Op
+participant "MES UI" as UI
+participant "MES API" as API
+database "Redis" as Redis
+database "MES DB" as DB
+
+Op -> UI: открыть дашборд\n(фильтр по статусу)
+UI -> API: GET /orders?status=…
+
+API -> Redis: GET mes:orders:{status}:{page}
+alt cache hit
+  Redis --> API: JSON списка
+  API --> UI: 200 + список
+else cache miss
+  Redis --> API: miss
+  API -> Redis: GET mes:orders:ver
+  Redis --> API: v = current
+  note right of API
+    Запоминаем версию **до** SELECT,
+    иначе после сброса ключа
+    можем записать устаревший список.
+  end note
+  API -> DB: SELECT заказов\n(пагинация)
+  DB --> API: rows
+  API -> Redis: атомарно: если ver == v\nто SET key + TTL ≈ 30–60 с\nиначе — не писать
+  Redis --> API: OK / skipped
+  API --> UI: 200 + список
+end
+
+UI --> Op: таблица заказов
+@enduml

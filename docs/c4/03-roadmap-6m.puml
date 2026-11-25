@@ -1,0 +1,54 @@
+@startgantt
+title Александрит — 6 месяцев · занятость и очередность\nДорожка = кто занят. Полоска = когда работает. Стрелка = ждём чужую работу.\nP0 красный · P1 синий · P2 зелёный · найм пшеничный. Критический путь Backend: I2→I11→I5→I7→I8.
+
+printscale weekly
+Project starts 2026-11-24
+saturday are closed
+sunday are closed
+
+' Параллель на одной дорожке = пик занятости (смотри DevOps после I1: I6+I4+I3b сразу).
+' Пустая зона на дорожке = роль свободна / ждёт вход.
+
+-- DevOps / SRE --
+[I1 Мониторинг Task2] starts 2026-11-24 and lasts 4 weeks and is colored in Salmon
+[I6 Gateway + rate limit] lasts 3 weeks and is colored in Salmon
+[I4 ELK логи Task4] lasts 4 weeks and is colored in LightBlue
+[I3b Collector + Jaeger] lasts 3 weeks and is colored in LightBlue
+[I8 Scale-out + replica] lasts 3 weeks and is colored in LightGreen
+
+-- Backend CRM / MES --
+[I2 Rabbit retry/идемпот.] starts 2026-12-01 and lasts 4 weeks and is colored in Salmon
+[I11 Outbox + DLQ] lasts 4 weeks and is colored in Salmon
+[I3 Трейсинг SDK Task3] lasts 4 weeks and is colored in LightBlue
+[I5 Кеш Redis Task5] lasts 3 weeks and is colored in LightBlue
+[I7 Calc worker] lasts 4 weeks and is colored in LightGreen
+
+-- Frontend MES --
+[I5b UX дашборда] lasts 3 weeks and is colored in LightBlue
+
+-- QA --
+[T1 Тесты пайплайна] lasts 3 weeks and is colored in Salmon
+[I9 Smoke E2E] lasts 3 weeks and is colored in LightGreen
+[I10 Приёмка 6м] lasts 1 weeks and is colored in LightGreen
+
+-- HR --
+[Hire React] starts 2026-11-24 and lasts 8 weeks and is colored in Wheat
+[Hire Backend/SRE] starts 2026-11-24 and lasts 6 weeks and is colored in Wheat
+
+' --- очередность: стрелка = «не стартуем, пока не кончилась» ---
+[I6 Gateway + rate limit] starts at [I1 Мониторинг Task2]'s end
+[I4 ELK логи Task4] starts at [I1 Мониторинг Task2]'s end
+[I3b Collector + Jaeger] starts at [I1 Мониторинг Task2]'s end
+[I3 Трейсинг SDK Task3] starts at [I1 Мониторинг Task2]'s end
+[I11 Outbox + DLQ] starts at [I2 Rabbit retry/идемпот.]'s end
+[T1 Тесты пайплайна] starts at [I2 Rabbit retry/идемпот.]'s end
+[I5 Кеш Redis Task5] starts at [I11 Outbox + DLQ]'s end
+[I7 Calc worker] starts at [I5 Кеш Redis Task5]'s end
+[I8 Scale-out + replica] starts at [I7 Calc worker]'s end
+[I9 Smoke E2E] starts at [I11 Outbox + DLQ]'s end
+[I9 Smoke E2E] starts at [I6 Gateway + rate limit]'s end
+[I5b UX дашборда] starts at [Hire React]'s end
+[I5b UX дашборда] starts at [I5 Кеш Redis Task5]'s start
+[I10 Приёмка 6м] starts at [I8 Scale-out + replica]'s end
+[I10 Приёмка 6м] starts at [I9 Smoke E2E]'s end
+@endgantt

@@ -1,0 +1,58 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+!include tags.inc
+
+LAYOUT_LEFT_RIGHT()
+HIDE_STEREOTYPE()
+
+skinparam linetype ortho
+skinparam nodesep 55
+skinparam ranksep 65
+skinparam wrapWidth 170
+
+title Container — алертинг по трейсам «Александрит»\nspanmetrics / critical spans → Prometheus → Alertmanager (Task2)\nзелёным — автомониторинг по spans; красным — контур трейсов
+
+Person(oncall, "On-call / Support", "Алерт → Jaeger по order_id", $tags="existing")
+
+System_Boundary(apps, "Critical path") {
+  Container(mesApi, "MES API (+ Shop/CRM)", "OTel SDK", "Partner · статусы · calc", $tags="trace")
+  ContainerQueue(rabbit, "RabbitMQ", "broker", "CRM↔MES + calc", $tags="existing")
+}
+
+System_Boundary(trace, "Трейсы") {
+  Container(otel, "OpenTelemetry Collector", "OTLP + spanmetrics", "Spans → Jaeger; метрики из spans → Prom", $tags="trace")
+  Container(jaeger, "Jaeger", "traces", "Lookup order_id после алерта", $tags="trace")
+}
+
+System_Boundary(metrics, "Метрики и алерты (Task2 + spans)") {
+  Container(prom, "Prometheus", "metrics", "Очереди (Task2) + spanmetrics", $tags="alert")
+  Container(am, "Alertmanager", "alerts", "P0: SLA статуса · partner error · stuck calc", $tags="alert")
+  Container(grafana, "Grafana", "dashboards", "Дашборды + drill-down", $tags="existing")
+}
+
+Rel(mesApi, rabbit, "publish/consume", "AMQP + W3C", $tags="trace")
+Rel(mesApi, otel, "OTLP\n(+ Shop/CRM)", "", $tags="trace")
+Rel(otel, jaeger, "export spans", "", $tags="trace")
+
+' --- зелёный контур ---
+Rel(otel, prom, "spanmetrics\nlatency / errors\ncritical spans", "", $tags="alert")
+Rel(prom, am, "rules", "", $tags="alert")
+Rel(prom, grafana, "query", "", $tags="existing")
+Rel(am, oncall, "ticket / chat", "", $tags="alert")
+Rel(oncall, jaeger, "order_id\nпосле алерта", "VPN/SSO", $tags="existing")
+
+note bottom of am
+  **Из трейсов в алерт (spanmetrics):**
+  · error rate / p99 partner + messaging hops
+  **P0 stuck/status/calc** — age/DLQ Task2;
+  Jaeger = drill-down по order_id
+end note
+
+Lay_R(apps, trace)
+Lay_R(trace, metrics)
+Lay_D(otel, jaeger)
+Lay_D(prom, am)
+Lay_R(am, grafana)
+
+SHOW_LEGEND()
+@enduml
